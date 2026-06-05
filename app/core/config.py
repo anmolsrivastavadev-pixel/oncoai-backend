@@ -32,6 +32,14 @@ class Settings(BaseSettings):
 
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> str:
+        # Check for a full database URL first (standard for deployments like Render/Heroku)
+        db_url = os.getenv("DATABASE_URL")
+        if db_url:
+            # SQLAlchemy requires "postgresql://" not "postgres://"
+            if db_url.startswith("postgres://"):
+                db_url = db_url.replace("postgres://", "postgresql://", 1)
+            return db_url
+
         user = quote_plus(self.POSTGRES_USER)
         password = quote_plus(self.POSTGRES_PASSWORD)
         return f"postgresql://{user}:{password}@{self.POSTGRES_SERVER}/{self.POSTGRES_DB}"
