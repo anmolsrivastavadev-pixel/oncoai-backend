@@ -12,7 +12,7 @@ import os
 import logging
 import traceback
 
-# Set up logging
+# Set up logging (Force Redeploy Trigger)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
