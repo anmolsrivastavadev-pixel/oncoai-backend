@@ -9,7 +9,7 @@ from sqlalchemy import text
 import time
 import os
 import logging
-import random
+import traceback
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -32,12 +32,11 @@ async def startup_event():
         # Create tables
         Base.metadata.create_all(bind=engine)
         
-        with engine.connect() as conn:
+        with engine.begin() as conn:
             # Run Migrations (Add columns if missing)
             try:
                 conn.execute(text("ALTER TABLE doctors ADD COLUMN IF NOT EXISTS lat FLOAT"))
                 conn.execute(text("ALTER TABLE doctors ADD COLUMN IF NOT EXISTS lon FLOAT"))
-                conn.commit()
             except Exception: pass
 
             # Seed default groups
@@ -53,7 +52,6 @@ async def startup_event():
                         "INSERT INTO community_groups (name, slug, description, icon, is_private, created_at) "
                         "VALUES (:name, :slug, :desc, :icon, FALSE, NOW())"
                     ), {"name": name, "slug": slug, "desc": desc, "icon": icon})
-                conn.commit()
 
             # Seed Doctors
             doc_count = conn.execute(text("SELECT COUNT(*) FROM doctors")).scalar()
@@ -62,23 +60,22 @@ async def startup_event():
                     "INSERT INTO doctors (name, specialty, location, rating, experience, phone, is_verified, consultation_fee, languages, qualifications, bio, hospital_name, lat, lon) "
                     "VALUES ('Dr. Sarah Chen', 'Dermatological Oncology', 'London', 4.9, '12 years', '+44-20-1234-5678', TRUE, 200.0, 'English', 'MD, FRCP', 'Melanoma specialist.', 'London Skin Institute', 51.5074, -0.1278)"
                 ))
-                conn.commit()
 
             # Seed a welcome post
             post_count = conn.execute(text("SELECT COUNT(*) FROM posts")).scalar()
             if post_count == 0:
-                # Find the first user (usually the one you just created)
+                # Find the first user
                 user_id = conn.execute(text("SELECT id FROM users LIMIT 1")).scalar()
                 if user_id:
                     conn.execute(text(
                         "INSERT INTO posts (title, content, category, user_id, created_at) "
-                        "VALUES ('Welcome to OncoAI!', 'This is a safe space for skin health awareness. Feel free to share your journey.', 'General', :uid, NOW())"
+                        "VALUES ('Welcome to OncoAI!', 'This is a safe space for skin health awareness.', 'General', :uid, NOW())"
                     ), {"uid": user_id})
-                    conn.commit()
             
             logger.info("Database initialization complete.")
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
+        traceback.print_exc()
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
@@ -89,8 +86,13 @@ async def log_requests(request: Request, call_next):
         logger.info(f"REQUEST: {request.method} {request.url.path} - {response.status_code} ({process_time:.2f}ms)")
         return response
     except Exception as e:
-        logger.error(f"Request failed: {request.method} {request.url.path} - Error: {e}")
-        return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
+        logger.error(f"CRITICAL ERROR during {request.method} {request.url.path}: {e}")
+        traceback.print_exc()
+        # Return the error message to the app so we can see it
+        return JSONResponse(
+            status_code=500, 
+            content={"detail": f"Server Error: {type(e).__name__}: {str(e)}"}
+        )
 
 @app.get("/")
 def read_root():

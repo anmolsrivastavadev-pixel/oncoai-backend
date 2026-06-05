@@ -36,13 +36,15 @@ class Settings(BaseSettings):
         db_url = os.getenv("DATABASE_URL")
         if db_url:
             db_url = db_url.strip() # Remove any accidental spaces or newlines
-            # SQLAlchemy requires "postgresql://" not "postgres://"
+            # Force the use of psycopg2 driver and ensure protocol is correct
             if db_url.startswith("postgres://"):
-                db_url = db_url.replace("postgres://", "postgresql://", 1)
+                db_url = db_url.replace("postgres://", "postgresql+psycopg2://", 1)
+            elif db_url.startswith("postgresql://"):
+                db_url = db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
             return db_url
 
         user = quote_plus(self.POSTGRES_USER)
         password = quote_plus(self.POSTGRES_PASSWORD)
-        return f"postgresql://{user}:{password}@{self.POSTGRES_SERVER}/{self.POSTGRES_DB}"
+        return f"postgresql+psycopg2://{user}:{password}@{self.POSTGRES_SERVER}/{self.POSTGRES_DB}"
 
 settings = Settings()
