@@ -8,104 +8,85 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 import time
 import os
+import logging
 
-# Create tables first
-Base.metadata.create_all(bind=engine)
-
-# --- DATABASE MIGRATIONS ---
-def run_migrations():
-    with engine.connect() as conn:
-        # Doctor columns
-        doctor_cols = [
-            ("lat", "FLOAT"), ("lon", "FLOAT"), ("bio", "TEXT"),
-            ("qualifications", "VARCHAR"), ("languages", "VARCHAR"),
-            ("consultation_fee", "FLOAT"), ("is_verified", "BOOLEAN"),
-            ("hospital_name", "VARCHAR"), ("google_place_id", "VARCHAR"),
-        ]
-        for col_name, col_type in doctor_cols:
-            try:
-                conn.execute(text(f"ALTER TABLE doctors ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
-                conn.commit()
-            except Exception:
-                pass
-
-        # Post columns
-        post_cols = [
-            ("image_url", "VARCHAR"), ("is_flagged", "BOOLEAN DEFAULT FALSE"),
-            ("flag_reason", "TEXT"), ("flagged_by", "INTEGER"),
-            ("is_hidden", "BOOLEAN DEFAULT FALSE"), ("pinned", "BOOLEAN DEFAULT FALSE"),
-            ("group_id", "INTEGER"), ("is_anonymous", "BOOLEAN DEFAULT FALSE"),
-        ]
-        for col_name, col_type in post_cols:
-            try:
-                conn.execute(text(f"ALTER TABLE posts ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
-                conn.commit()
-            except Exception:
-                pass
-
-        # Comment columns
-        for col_name, col_type in [("is_flagged", "BOOLEAN DEFAULT FALSE"), ("edited_at", "TIMESTAMP WITH TIME ZONE")]:
-            try:
-                conn.execute(text(f"ALTER TABLE comments ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
-                conn.commit()
-            except Exception:
-                pass
-
-        # User columns
-        for col_name, col_type in [("bio", "TEXT"), ("support_badges", "VARCHAR"), ("profile_photo_url", "VARCHAR"),
-                                    ("strike_count", "INTEGER DEFAULT 0"), ("last_strike_at", "TIMESTAMP WITH TIME ZONE"),
-                                    ("moderation_notes", "TEXT")]:
-            try:
-                conn.execute(text(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
-                conn.commit()
-            except Exception:
-                pass
-
-        # Scan columns
-        for col_name, col_type in [("quality_score", "FLOAT"), ("asymmetry_score", "FLOAT"),
-                                    ("border_score", "FLOAT"), ("color_score", "FLOAT"),
-                                    ("diameter_mm", "FLOAT"), ("feature_details", "TEXT")]:
-            try:
-                conn.execute(text(f"ALTER TABLE scans ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
-                conn.commit()
-            except Exception:
-                pass
-
-        conn.commit()
-
-run_migrations()
-
-# Seed default groups
-try:
-    with engine.connect() as conn:
-        existing = conn.execute(text("SELECT COUNT(*) FROM community_groups")).scalar()
-        if existing == 0:
-            defaults = [
-                ("Early Detection", "early-detection", "Share and learn about early detection strategies", "Search"),
-                ("Treatment Support", "treatment-support", "Support through treatment journeys", "HeartHandshake"),
-                ("Family & Caregivers", "family-caregivers", "A space for caregivers and loved ones", "Users"),
-                ("Recovery Journeys", "recovery-journeys", "Celebrate recovery milestones together", "Sparkles"),
-                ("Emotional Wellbeing", "emotional-wellbeing", "Mental and emotional health support", "Heart"),
-            ]
-            for name, slug, desc, icon in defaults:
-                conn.execute(text(
-                    "INSERT INTO community_groups (name, slug, description, icon, is_private, created_at) "
-                    "VALUES (:name, :slug, :desc, :icon, :private, NOW())"
-                ), {"name": name, "slug": slug, "desc": desc, "icon": icon, "private": False})
-            conn.commit()
-except Exception as e:
-    print(f"Seeding error: {e}")
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title=settings.PROJECT_NAME, description="Educational Skin Health Awareness Platform", version="1.0.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.on_event("startup")
+async def startup_event():
+    logger.info("Starting up and initializing database...")
+    try:
+        # Create tables
+        Base.metadata.create_all(bind=engine)
+        
+        with engine.connect() as conn:
+            # Run Migrations
+            doctor_cols = [
+                ("lat", "FLOAT"), ("lon", "FLOAT"), ("bio", "TEXT"),
+                ("qualifications", "VARCHAR"), ("languages", "VARCHAR"),
+                ("consultation_fee", "FLOAT"), ("is_verified", "BOOLEAN"),
+                ("hospital_name", "VARCHAR"), ("google_place_id", "VARCHAR"),
+            ]
+            for col_name, col_type in doctor_cols:
+                try:
+                    conn.execute(text(f"ALTER TABLE doctors ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
+                except Exception: pass
+
+            post_cols = [
+                ("image_url", "VARCHAR"), ("is_flagged", "BOOLEAN DEFAULT FALSE"),
+                ("flag_reason", "TEXT"), ("flagged_by", "INTEGER"),
+                ("is_hidden", "BOOLEAN DEFAULT FALSE"), ("pinned", "BOOLEAN DEFAULT FALSE"),
+                ("group_id", "INTEGER"), ("is_anonymous", "BOOLEAN DEFAULT FALSE"),
+            ]
+            for col_name, col_type in post_cols:
+                try:
+                    conn.execute(text(f"ALTER TABLE posts ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
+                except Exception: pass
+
+            # Seed default groups
+            existing = conn.execute(text("SELECT COUNT(*) FROM community_groups")).scalar()
+            if existing == 0:
+                defaults = [
+                    ("Early Detection", "early-detection", "Share and learn about early detection strategies", "Search"),
+                    ("Treatment Support", "treatment-support", "Support through treatment journeys", "HeartHandshake"),
+                    ("Family & Caregivers", "family-caregivers", "A space for caregivers and loved ones", "Users"),
+                    ("Recovery Journeys", "recovery-journeys", "Celebrate recovery milestones together", "Sparkles"),
+                    ("Emotional Wellbeing", "emotional-wellbeing", "Mental and emotional health support", "Heart"),
+                ]
+                for name, slug, desc, icon in defaults:
+                    conn.execute(text(
+                        "INSERT INTO community_groups (name, slug, description, icon, is_private, created_at) "
+                        "VALUES (:name, :slug, :desc, :icon, :private, NOW())"
+                    ), {"name": name, "slug": slug, "desc": desc, "icon": icon, "private": False})
+            
+            conn.commit()
+            logger.info("Database initialization complete.")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     start_time = time.time()
     response = await call_next(request)
     process_time = (time.time() - start_time) * 1000
-    print(f"REQUEST: {request.method} {request.url.path} - {response.status_code} ({process_time:.2f}ms)")
+    logger.info(f"REQUEST: {request.method} {request.url.path} - {response.status_code} ({process_time:.2f}ms)")
     return response
+
+@app.get("/")
+def read_root():
+    return {"message": "Welcome to OncoAI API", "status": "online"}
 
 API_PREFIX = "/api/v1"
 app.include_router(auth.router, prefix=f"{API_PREFIX}/auth", tags=["auth"])
