@@ -9,6 +9,7 @@ feature extraction, edge detection, color analysis, asymmetry measurement.
 What's not real: no dermatological AI model, no cancer detection, no diagnosis.
 """
 
+import asyncio
 import uuid
 import os
 import cv2
@@ -20,6 +21,8 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from app import models, schemas
 from app.api import deps
+
+MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
 
 router = APIRouter()
 
@@ -205,6 +208,78 @@ def estimate_diameter(contour: np.ndarray, image: np.ndarray) -> tuple:
     return mm_est, note
 
 
+# ─── ASYNC-FRIENDLY ANALYSIS RUNNER ─────────────────────────
+
+def _run_image_analysis(img: np.ndarray) -> dict:
+    """Synchronous OpenCV pipeline. Runs in a thread pool to avoid blocking the event loop."""
+    blur_score = round(float(detect_blur(img)), 1)
+    lighting = detect_lighting(img)
+    tips = quality_feedback(lighting["brightness"], lighting["contrast"], blur_score)
+    quality = round(min(100.0, max(10.0, (blur_score / 5) + (lighting["brightness"] / 2.55))), 1)
+
+    contour, mask, found = segment_lesion(img)
+
+    features = []
+    warnings = []
+    asym = border = color_var = 0.0
+    diam = None
+
+    if found and contour is not None:
+        asym, asym_detail, asym_recs = analyze_asymmetry(img, contour)
+        features.append(asym_detail)
+        warnings.extend(asym_recs)
+
+        border, border_detail, border_recs = analyze_border(img, contour)
+        features.append(border_detail)
+        warnings.extend(border_recs)
+
+        color_var, color_detail, color_recs = analyze_color(img, contour)
+        features.append(color_detail)
+        warnings.extend(color_recs)
+
+        diam, diam_note = estimate_diameter(contour, img)
+        features.append(diam_note)
+    else:
+        features.append("Could not isolate a distinct skin lesion. Try photographing closer with better lighting.")
+        tips.append("No distinct lesion detected. Ensure the lesion fills the frame and the image is well-lit.")
+
+    overall_score = round((asym + border + color_var) / 3, 1)
+    feature_detail = " | ".join(features)
+
+    if not found:
+        classification = "Insufficient Image Quality"
+        confidence = quality
+        guidance = "Unable to analyze. " + (" ".join(tips) if tips else "Please retake with better lighting and a closer view of the lesion.")
+    elif overall_score < 25:
+        classification = "Low Visual Variation"
+        confidence = round(min(95.0, 75.0 + (100 - overall_score) * 0.2), 1)
+        guidance = "The lesion shows relatively uniform visual patterns. Continue regular monitoring. " + (" ".join(warnings) if warnings else "")
+    elif overall_score < 50:
+        classification = "Moderate Visual Variation"
+        confidence = round(60.0 + (50 - overall_score) * 0.4, 1)
+        guidance = "Some visual variation detected. " + (" ".join(warnings) if warnings else "Consider professional review for peace of mind.")
+    else:
+        classification = "Significant Visual Variation"
+        confidence = round(50.0 + (100 - overall_score) * 0.15, 1)
+        guidance = "Multiple visual patterns detected. " + (" ".join(warnings) if warnings else "A dermatologist review is recommended.")
+
+    return {
+        "blur_score": blur_score,
+        "lighting": lighting,
+        "tips": tips,
+        "quality": quality,
+        "asym": asym,
+        "border": border,
+        "color_var": color_var,
+        "diam": diam,
+        "overall_score": overall_score,
+        "feature_detail": feature_detail,
+        "classification": classification,
+        "confidence": confidence,
+        "guidance": guidance,
+    }
+
+
 # ─── MAIN ENDPOINT ──────────────────────────────────────────
 
 @router.post("/upload", response_model=schemas.scan.Scan)
@@ -224,82 +299,42 @@ async def upload_skin_image(
     file_path = os.path.join(UPLOAD_DIR, unique_filename)
 
     content = await file.read()
+    if len(content) > MAX_UPLOAD_SIZE:
+        raise HTTPException(status_code=413, detail=f"File too large. Maximum {MAX_UPLOAD_SIZE // (1024*1024)} MB allowed.")
+
     with open(file_path, "wb") as f:
         f.write(content)
 
     try:
         pil_img = Image.open(file_path).convert('RGB')
         img = np.array(pil_img)
-        h, w = img.shape[:2]
+    except Exception:
+        raise HTTPException(status_code=500, detail="Image analysis failed. Please try a different image.")
 
-        # ─── Quality Analysis ─────────────────────────────
-        blur_score = round(float(detect_blur(img)), 1)
-        lighting = detect_lighting(img)
-        tips = quality_feedback(lighting["brightness"], lighting["contrast"], blur_score)
-        quality = round(min(100.0, max(10.0, (blur_score / 5) + (lighting["brightness"] / 2.55))), 1)
-
-        # ─── Lesion Segmentation ──────────────────────────
-        contour, mask, found = segment_lesion(img)
-
-        features = []
-        warnings = []
-        asym = border = color_var = 0.0
-        diam = None
-
-        if found and contour is not None:
-            asym, asym_detail, asym_recs = analyze_asymmetry(img, contour)
-            features.append(asym_detail)
-            warnings.extend(asym_recs)
-
-            border, border_detail, border_recs = analyze_border(img, contour)
-            features.append(border_detail)
-            warnings.extend(border_recs)
-
-            color_var, color_detail, color_recs = analyze_color(img, contour)
-            features.append(color_detail)
-            warnings.extend(color_recs)
-
-            diam, diam_note = estimate_diameter(contour, img)
-            features.append(diam_note)
-        else:
-            features.append("Could not isolate a distinct skin lesion. Try photographing closer with better lighting.")
-            tips.append("No distinct lesion detected. Ensure the lesion fills the frame and the image is well-lit.")
-
-        # ─── Build Educational Guidance ────────────────────
-        overall_score = round((asym + border + color_var) / 3, 1)
-        feature_detail = " | ".join(features)
-
-        if not found:
-            classification = "Insufficient Image Quality"
-            confidence = quality
-            guidance = "Unable to analyze. " + (" ".join(tips) if tips else "Please retake with better lighting and a closer view of the lesion.")
-        elif overall_score < 25:
-            classification = "Low Visual Variation"
-            confidence = round(min(95.0, 75.0 + (100 - overall_score) * 0.2), 1)
-            guidance = "The lesion shows relatively uniform visual patterns. Continue regular monitoring. " + (" ".join(warnings) if warnings else "")
-        elif overall_score < 50:
-            classification = "Moderate Visual Variation"
-            confidence = round(60.0 + (50 - overall_score) * 0.4, 1)
-            guidance = "Some visual variation detected. " + (" ".join(warnings) if warnings else "Consider professional review for peace of mind.")
-        else:
-            classification = "Significant Visual Variation"
-            confidence = round(50.0 + (100 - overall_score) * 0.15, 1)
-            guidance = "Multiple visual patterns detected. " + (" ".join(warnings) if warnings else "A dermatologist review is recommended.")
+    # Offload all OpenCV CPU-bound analysis to a thread pool
+    try:
+        analysis = await asyncio.to_thread(_run_image_analysis, img)
     except Exception as e:
         print(f"Analysis error: {e}")
         raise HTTPException(status_code=500, detail="Image analysis failed. Please try a different image.")
 
+    quality = analysis["quality"]
+    asym = analysis["asym"]
+    border = analysis["border"]
+    color_var = analysis["color_var"]
+    diam = analysis["diam"]
+
     db_obj = models.Scan(
         filename=unique_filename,
-        classification=classification,
-        confidence=float(confidence),
-        guidance=guidance,
+        classification=analysis["classification"],
+        confidence=float(analysis["confidence"]),
+        guidance=analysis["guidance"],
         quality_score=float(quality),
         asymmetry_score=float(asym),
         border_score=float(border),
         color_score=float(color_var),
         diameter_mm=float(diam) if diam else None,
-        feature_details=feature_detail,
+        feature_details=analysis["feature_detail"],
         user_id=current_user.id,
     )
     db.add(db_obj)
