@@ -1,11 +1,12 @@
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api.v1 import auth, scan, doctors, community, assistant, files, appointments, moderation, groups, notifications, users, checkins, messaging
-from app.db.session import engine, Base
+from app.db.session import engine, Base, get_db
 from app import models
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 import time
 import os
 import logging
@@ -40,42 +41,34 @@ async def startup_event():
             except Exception: pass
 
             # Seed default groups
-            group_count = conn.execute(text("SELECT COUNT(*) FROM community_groups")).scalar()
-            if group_count == 0:
-                defaults = [
-                    ("Early Detection", "early-detection", "Share and learn about early detection", "Search"),
-                    ("Treatment Support", "treatment-support", "Support through treatment", "HeartHandshake"),
-                    ("Family & Caregivers", "family-caregivers", "Loved ones support", "Users"),
-                ]
-                for name, slug, desc, icon in defaults:
-                    conn.execute(text(
-                        "INSERT INTO community_groups (name, slug, description, icon, is_private, created_at) "
-                        "VALUES (:name, :slug, :desc, :icon, FALSE, NOW())"
-                    ), {"name": name, "slug": slug, "desc": desc, "icon": icon})
+            try:
+                group_count = conn.execute(text("SELECT COUNT(*) FROM community_groups")).scalar()
+                if group_count == 0:
+                    defaults = [
+                        ("Early Detection", "early-detection", "Share and learn about early detection", "Search"),
+                        ("Treatment Support", "treatment-support", "Support through treatment", "HeartHandshake"),
+                        ("Family & Caregivers", "family-caregivers", "Loved ones support", "Users"),
+                    ]
+                    for name, slug, desc, icon in defaults:
+                        conn.execute(text(
+                            "INSERT INTO community_groups (name, slug, description, icon, is_private, created_at) "
+                            "VALUES (:name, :slug, :desc, :icon, FALSE, NOW())"
+                        ), {"name": name, "slug": slug, "desc": desc, "icon": icon})
+            except Exception: pass
 
             # Seed Doctors
-            doc_count = conn.execute(text("SELECT COUNT(*) FROM doctors")).scalar()
-            if doc_count == 0:
-                conn.execute(text(
-                    "INSERT INTO doctors (name, specialty, location, rating, experience, phone, is_verified, consultation_fee, languages, qualifications, bio, hospital_name, lat, lon) "
-                    "VALUES ('Dr. Sarah Chen', 'Dermatological Oncology', 'London', 4.9, '12 years', '+44-20-1234-5678', TRUE, 200.0, 'English', 'MD, FRCP', 'Melanoma specialist.', 'London Skin Institute', 51.5074, -0.1278)"
-                ))
-
-            # Seed a welcome post
-            post_count = conn.execute(text("SELECT COUNT(*) FROM posts")).scalar()
-            if post_count == 0:
-                # Find the first user
-                user_id = conn.execute(text("SELECT id FROM users LIMIT 1")).scalar()
-                if user_id:
+            try:
+                doc_count = conn.execute(text("SELECT COUNT(*) FROM doctors")).scalar()
+                if doc_count == 0:
                     conn.execute(text(
-                        "INSERT INTO posts (title, content, category, user_id, created_at) "
-                        "VALUES ('Welcome to OncoAI!', 'This is a safe space for skin health awareness.', 'General', :uid, NOW())"
-                    ), {"uid": user_id})
+                        "INSERT INTO doctors (name, specialty, location, rating, experience, phone, is_verified, consultation_fee, languages, qualifications, bio, hospital_name, lat, lon) "
+                        "VALUES ('Dr. Sarah Chen', 'Dermatological Oncology', 'London', 4.9, '12 years', '+44-20-1234-5678', TRUE, 200.0, 'English', 'MD, FRCP', 'Melanoma specialist.', 'London Skin Institute', 51.5074, -0.1278)"
+                    ))
+            except Exception: pass
             
             logger.info("Database initialization complete.")
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
-        traceback.print_exc()
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
@@ -86,12 +79,10 @@ async def log_requests(request: Request, call_next):
         logger.info(f"REQUEST: {request.method} {request.url.path} - {response.status_code} ({process_time:.2f}ms)")
         return response
     except Exception as e:
-        logger.error(f"CRITICAL ERROR during {request.method} {request.url.path}: {e}")
-        traceback.print_exc()
-        # Return the error message to the app so we can see it
+        logger.error(f"CRITICAL ERROR: {e}")
         return JSONResponse(
             status_code=500, 
-            content={"detail": f"Server Error: {type(e).__name__}: {str(e)}"}
+            content={"detail": f"Internal Server Error: {str(e)}"}
         )
 
 @app.get("/")
@@ -114,5 +105,9 @@ app.include_router(checkins.router, prefix=f"{API_PREFIX}/checkins", tags=["chec
 app.include_router(messaging.router, prefix=f"{API_PREFIX}/messaging", tags=["messaging"])
 
 @app.get("/health")
-def health_check():
-    return {"status": "healthy"}
+def health_check(db: Session = Depends(get_db)):
+    try:
+        db.execute(text("SELECT 1"))
+        return {"status": "healthy", "db": "connected"}
+    except Exception as e:
+        return {"status": "unhealthy", "db": str(e)}
