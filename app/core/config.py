@@ -35,6 +35,7 @@ class Settings(BaseSettings):
         # Check for a full database URL first (standard for deployments like Render/Heroku)
         db_url = os.getenv("DATABASE_URL")
         if db_url:
+            db_url = db_url.strip() # Remove any accidental spaces or newlines
             # SQLAlchemy requires "postgresql://" not "postgres://"
             if db_url.startswith("postgres://"):
                 db_url = db_url.replace("postgres://", "postgresql://", 1)
