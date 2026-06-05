@@ -41,10 +41,16 @@ class Settings(BaseSettings):
                 db_url = db_url.replace("postgres://", "postgresql+psycopg2://", 1)
             elif db_url.startswith("postgresql://"):
                 db_url = db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+            
+            # Log the connection (masking password)
+            import re
+            masked = re.sub(r":([^@]+)@", ":****@", db_url)
+            print(f"DEBUG: Using DATABASE_URL: {masked}")
             return db_url
 
         user = quote_plus(self.POSTGRES_USER)
         password = quote_plus(self.POSTGRES_PASSWORD)
+        print(f"DEBUG: Falling back to components. User: {user}")
         return f"postgresql+psycopg2://{user}:{password}@{self.POSTGRES_SERVER}/{self.POSTGRES_DB}"
 
 settings = Settings()
