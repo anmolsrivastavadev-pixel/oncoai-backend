@@ -1,9 +1,41 @@
-venv/
-__pycache__/
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Backend
+backend/venv/
+backend/uploads/
+backend/.env
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.pyc
+backend/backend.log
+backend/backend_test.log
 *.pyc
-.env
-uploads/
-*.log
+
+# Frontend
+frontend/node_modules/
+frontend/.env
+frontend/build/
+frontend/dist/
+
+# Node
+node_modules/
+
+# IDE
 .idea/
-.mypy_cache/
-backend_out.txt
+.vscode/
+*.swp
+*.swo

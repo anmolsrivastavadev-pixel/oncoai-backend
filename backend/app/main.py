@@ -1,0 +1,134 @@
+from fastapi import FastAPI, Request, Response, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from app.core.config import settings
+from app.api.v1 import auth, scan, doctors, community, assistant, files, appointments, moderation, groups, notifications, users, checkins, messaging
+from app.db.session import engine, Base, get_db
+from app import models
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+import asyncio
+import time
+import os
+import uuid
+import logging
+import traceback
+
+# Set up logging (Force Redeploy Trigger)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title=settings.PROJECT_NAME, description="Educational Skin Health Awareness Platform", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.on_event("startup")
+async def startup_event():
+    logger.info("Starting up and initializing database...")
+    try:
+        # Create tables
+        Base.metadata.create_all(bind=engine)
+        
+        with engine.begin() as conn:
+            # Run Migrations (Add columns if missing)
+            try:
+                conn.execute(text("ALTER TABLE doctors ADD COLUMN IF NOT EXISTS lat FLOAT"))
+                conn.execute(text("ALTER TABLE doctors ADD COLUMN IF NOT EXISTS lon FLOAT"))
+            except Exception: pass
+
+            # Seed default groups
+            try:
+                group_count = conn.execute(text("SELECT COUNT(*) FROM community_groups")).scalar()
+                if group_count == 0:
+                    defaults = [
+                        ("Early Detection", "early-detection", "Share and learn about early detection", "Search"),
+                        ("Treatment Support", "treatment-support", "Support through treatment", "HeartHandshake"),
+                        ("Family & Caregivers", "family-caregivers", "Loved ones support", "Users"),
+                    ]
+                    for name, slug, desc, icon in defaults:
+                        conn.execute(text(
+                            "INSERT INTO community_groups (name, slug, description, icon, is_private, created_at) "
+                            "VALUES (:name, :slug, :desc, :icon, FALSE, NOW())"
+                        ), {"name": name, "slug": slug, "desc": desc, "icon": icon})
+            except Exception: pass
+
+            # Seed Doctors
+            try:
+                doc_count = conn.execute(text("SELECT COUNT(*) FROM doctors")).scalar()
+                if doc_count == 0:
+                    conn.execute(text(
+                        "INSERT INTO doctors (name, specialty, location, rating, experience, phone, is_verified, consultation_fee, languages, qualifications, bio, hospital_name, lat, lon) "
+                        "VALUES ('Dr. Sarah Chen', 'Dermatological Oncology', 'London', 4.9, '12 years', '+44-20-1234-5678', TRUE, 200.0, 'English', 'MD, FRCP', 'Melanoma specialist.', 'London Skin Institute', 51.5074, -0.1278)"
+                    ))
+            except Exception: pass
+            
+            logger.info("Database initialization complete.")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    req_id = str(uuid.uuid4())[:8]
+    request.state.req_id = req_id
+    start_time = time.time()
+    try:
+        response = await call_next(request)
+        process_time = (time.time() - start_time) * 1000
+        logger.info(f"[{req_id}] {request.method} {request.url.path} → {response.status_code} in {process_time:.0f}ms")
+        return response
+    except asyncio.CancelledError:
+        logger.warning(f"[{req_id}] CANCELLED {request.method} {request.url.path} after {(time.time() - start_time)*1000:.0f}ms")
+        return JSONResponse(status_code=499, content={"detail": "Request cancelled."})
+    except Exception as e:
+        logger.error(f"[{req_id}] CRITICAL ERROR {request.method} {request.url.path}: {e}")
+        return JSONResponse(
+            status_code=500, 
+            content={"detail": f"Internal Server Error: {str(e)}"}
+        )
+
+
+@app.middleware("http")
+async def timeout_middleware(request: Request, call_next):
+    """Enforce a request timeout so slow operations don't hang indefinitely.
+    Scan endpoints get 95s (just under Cloudflare's ~100s tunnel limit).
+    Other endpoints get 30s."""
+    timeout = 95 if request.url.path.startswith("/api/v1/scan") else 30
+    try:
+        return await asyncio.wait_for(call_next(request), timeout=timeout)
+    except asyncio.TimeoutError:
+        req_id = getattr(request.state, "req_id", "?")
+        logger.error(f"[{req_id}] TIMEOUT {request.method} {request.url.path} exceeded {timeout}s")
+        return JSONResponse(status_code=504, content={"detail": f"Request timed out after {timeout} seconds."})
+
+@app.get("/")
+def read_root():
+    return {"message": "Welcome to OncoAI API", "status": "online"}
+
+API_PREFIX = "/api/v1"
+app.include_router(auth.router, prefix=f"{API_PREFIX}/auth", tags=["auth"])
+app.include_router(scan.router, prefix=f"{API_PREFIX}/scan", tags=["scan"])
+app.include_router(doctors.router, prefix=f"{API_PREFIX}/doctors", tags=["doctors"])
+app.include_router(community.router, prefix=f"{API_PREFIX}/community", tags=["community"])
+app.include_router(assistant.router, prefix=f"{API_PREFIX}/assistant", tags=["assistant"])
+app.include_router(files.router, prefix=f"{API_PREFIX}/files", tags=["files"])
+app.include_router(appointments.router, prefix=f"{API_PREFIX}/appointments", tags=["appointments"])
+app.include_router(moderation.router, prefix=f"{API_PREFIX}/moderation", tags=["moderation"])
+app.include_router(groups.router, prefix=f"{API_PREFIX}/groups", tags=["groups"])
+app.include_router(notifications.router, prefix=f"{API_PREFIX}/notifications", tags=["notifications"])
+app.include_router(users.router, prefix=f"{API_PREFIX}/users", tags=["users"])
+app.include_router(checkins.router, prefix=f"{API_PREFIX}/checkins", tags=["checkins"])
+app.include_router(messaging.router, prefix=f"{API_PREFIX}/messaging", tags=["messaging"])
+
+@app.get("/health")
+def health_check(db: Session = Depends(get_db)):
+    try:
+        db.execute(text("SELECT 1"))
+        return {"status": "healthy", "db": "connected"}
+    except Exception as e:
+        return {"status": "unhealthy", "db": str(e)}
