@@ -82,6 +82,18 @@ class Settings(BaseSettings):
 
     SEED_SAMPLE_DATA: bool = True
 
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def _normalise_database_url(cls, value: object) -> object:
+        """Hosting platforms hand out ``postgres://`` / ``postgresql://`` URLs; make them
+        use the psycopg 3 driver this app is built on."""
+        if isinstance(value, str):
+            value = value.strip()
+            for prefix in ("postgres://", "postgresql://"):
+                if value.startswith(prefix):
+                    return "postgresql+psycopg://" + value[len(prefix) :]
+        return value
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def _split_origins(cls, value: object) -> object:

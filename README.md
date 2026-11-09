@@ -29,7 +29,7 @@ docker compose up --build                 # API on http://localhost:8000, docs a
 
 The first start downloads the scan model (about 330 MB) into a Docker volume. Set
 `FETCH_MODEL=0` to skip it; the API then uses the computer-vision-only analyzer.
-Without Docker: see [backend/README.md](backend/README.md).
+Without Docker: see [backend/README.md](backend/README.md). To host it: [docs/DEPLOY.md](docs/DEPLOY.md) (Render config included).
 
 ### 2. Web app (for development)
 

@@ -135,3 +135,13 @@ def test_delete_account_removes_data_and_images(client: TestClient, alice: Accou
     assert client.delete("/api/v1/users/me", headers=alice.headers).status_code == 204
     assert not user_dir.exists()
     assert client.post("/api/v1/auth/login", json={"email": alice.email, "password": alice.password}).status_code == 401
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["postgres://u:p@host:5432/db", "postgresql://u:p@host:5432/db", "postgresql+psycopg://u:p@host:5432/db"],
+)
+def test_database_url_is_normalised_to_psycopg(url: str) -> None:
+    from app.core.config import Settings
+
+    assert Settings(DATABASE_URL=url).DATABASE_URL == "postgresql+psycopg://u:p@host:5432/db"

@@ -20,11 +20,14 @@ RUN useradd --system --create-home --uid 10001 oncoai \
     && mkdir -p /data/uploads /data/models \
     && chown -R oncoai:oncoai /data /app \
     && chmod +x docker-entrypoint.sh
-USER oncoai
+# The entrypoint starts as root only to fix ownership of the mounted /data volume
+# (hosts mount volumes root-owned), then drops to the unprivileged oncoai user.
 
 ENV UPLOAD_DIR=/data/uploads MODEL_DIR=/data/models/skin-lesion-vit
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-  CMD curl -fsS http://localhost:8000/health || exit 1
+  CMD curl -fsS "http://localhost:${PORT:-8000}/health" || exit 1
 ENTRYPOINT ["./docker-entrypoint.sh"]
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+# PORT is injected by most container hosts. Set FORWARDED_ALLOW_IPS only when the
+# container sits behind a trusted proxy, so client IPs (used for rate limits) are right.
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers"]
