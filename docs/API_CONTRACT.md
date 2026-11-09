@@ -101,7 +101,7 @@ All JSON. Timestamps are ISO-8601 UTC strings. IDs are integers.
 - `POST /posts/{id}/comments` `{body (1-2000), anonymous?}` → 201 `Comment`; `DELETE /comments/{id}` → 204
 - `POST /posts/{id}/reactions` `{kind:"support"|"hug"|"strength"|"relate"}` → toggles; returns `{reactions: {support:n,...}, my_reactions:[kind]}`
 - `POST /posts/{id}/report` / `POST /comments/{id}/report` `{reason}` → 201 `{id, status:"open"}`
-- Moderation (role moderator/admin): `GET /moderation/reports?status=open` ; `POST /moderation/reports/{id}/resolve` `{action:"dismiss"|"remove_content"}`
+- Moderation (role moderator/admin; mounted at `/api/v1/moderation`, NOT under `/community`): `GET /api/v1/moderation/reports?status=open` ; `POST /api/v1/moderation/reports/{id}/resolve` `{action:"dismiss"|"remove_content"}`
 - `Post` = `{id, title, body, topic, author: {id|null, display_name}, created_at, comment_count, reactions:{support,hug,strength,relate}, my_reactions:[kind], is_mine, status:"visible"|"removed"}`
 - `Comment` = `{id, post_id, body, author:{id|null, display_name}, created_at, is_mine}`
 - Server-side content filter: posts/comments containing phone numbers/emails are rejected (422) to protect privacy; profanity masked; posts with >=3 open reports auto-hidden pending review.

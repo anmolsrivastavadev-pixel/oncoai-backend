@@ -387,11 +387,11 @@ export class ApiClient {
     reportComment: (id: number, reason: string) =>
       this.request<T.ReportResult>(`/community/comments/${id}/report`, { method: 'POST', body: { reason } }),
     reports: (status = 'open') =>
-      this.request<T.ItemsOnly<T.ModerationReport> | T.ModerationReport[]>('/community/moderation/reports', {
+      this.request<T.ItemsOnly<T.ModerationReport> | T.ModerationReport[]>('/moderation/reports', {
         query: { status },
       }).then((r) => (Array.isArray(r) ? r : (r?.items ?? []))),
     resolveReport: (id: number, action: T.ModerationAction) =>
-      this.request<unknown>(`/community/moderation/reports/${id}/resolve`, { method: 'POST', body: { action } }),
+      this.request<unknown>(`/moderation/reports/${id}/resolve`, { method: 'POST', body: { action } }),
   };
 
   assistant = {

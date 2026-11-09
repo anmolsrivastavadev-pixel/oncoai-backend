@@ -226,3 +226,34 @@ def test_chat_validation_and_auth(client: TestClient, alice: Account) -> None:
     assert client.post(
         "/api/v1/assistant/chat", headers=alice.headers, json={"messages": [{"role": "system", "content": "x"}]}
     ).status_code == 422
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Which cream removes a mole at home?",
+        "Can I cut off a mole myself?",
+        "what ointment should I put on this lesion",
+        "does apple cider vinegar remove moles",
+    ],
+)
+def test_home_removal_questions_are_redirected(client: TestClient, alice: Account, question: str) -> None:
+    body = client.post(
+        "/api/v1/assistant/chat", headers=alice.headers, json={"messages": [{"role": "user", "content": question}]}
+    ).json()
+    assert body["safety"] == {"redirected": True, "reason": "treatment_request"}
+
+
+def test_scan_context_does_not_hijack_unrelated_questions(
+    client: TestClient, alice: Account, regular_jpeg: bytes
+) -> None:
+    scan = client.post(
+        "/api/v1/scans", headers=alice.headers, files={"image": ("s.jpg", regular_jpeg, "image/jpeg")}
+    ).json()
+    body = client.post(
+        "/api/v1/assistant/chat",
+        headers=alice.headers,
+        json={"messages": [{"role": "user", "content": "What is SPF?"}], "context": {"scan_id": scan["id"]}},
+    ).json()
+    assert "spf" in body["reply"].lower()
+    assert not body["reply"].startswith("Understanding your OncoAI scan result")

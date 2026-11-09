@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from sqlalchemy.orm import Session
 
@@ -14,6 +15,12 @@ from app.services.assistant.knowledge_base import ARTICLES, ARTICLES_BY_ID, Arti
 from app.services.assistant.retrieval import retriever
 
 logger = logging.getLogger(__name__)
+
+# Only steer retrieval towards the scan article when the question is about the scan.
+_SCAN_QUESTION = re.compile(
+    r"\b(scan|result|score|concern|feature|asymmetr|border|colou?r\s+variation|photo|analysis|this\s+spot|my\s+spot)",
+    re.IGNORECASE,
+)
 
 MAX_HISTORY = 12
 DEFAULT_SUGGESTIONS = [
@@ -86,11 +93,12 @@ def chat(db: Session, payload: ChatIn, scan: Scan | None) -> ChatOut:
         )
 
     query = last_user
-    if scan is not None and len(last_user.split()) < 12:
+    about_scan = bool(_SCAN_QUESTION.search(last_user))
+    if scan is not None and about_scan:
         query += " oncoai scan result concern level"
     hits = retriever.search(query, k=3)
     articles = [hit.article for hit in hits]
-    if scan is not None and ARTICLES_BY_ID["understanding-results"] not in articles:
+    if scan is not None and about_scan and ARTICLES_BY_ID["understanding-results"] not in articles:
         articles.append(ARTICLES_BY_ID["understanding-results"])
     sources = _sources([s for a in articles for s in a.sources])
     suggestions = _suggestions(articles)

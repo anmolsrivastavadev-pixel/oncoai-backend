@@ -69,6 +69,10 @@ _TREATMENT = _rx(
     r"\bremove\s+(it|this|my\s+mole|the\s+mole|a\s+mole)\s+(at\s+home|myself|by\s+myself)",
     r"\b(chemo(therapy)?|radiotherapy|immunotherapy|surgery)\b",
     r"\bhome\s+remed(y|ies)\b",
+    r"\b(which|what)\s+(cream|ointment|gel|lotion|product|oil|acid)\b.{0,60}\b(mole|spot|lesion|wart|growth|sore|skin\s+tag)",
+    r"\b(cream|ointment|gel|lotion|oil|acid|vinegar|garlic|iodine)\b.{0,40}\b(remov|burn|shrink|fade|get\s+rid)",
+    r"\b(remov\w*|cut\w*\s+off|burn\w*\s+off|freez\w*\s+off|shav\w*\s+off|pick\w*\s+off)\b.{0,30}\b(mole|spot|lesion|growth|skin\s+tag)\b.{0,30}\b(at\s+home|myself|by\s+myself|on\s+my\s+own|diy)",
+    r"\b(at\s+home|myself|diy)\b.{0,30}\b(remov\w*|cut\w*\s+off|burn\w*\s+off)\b.{0,30}\b(mole|spot|lesion|growth)",
 )
 
 _OUTPUT_BLOCK = _rx(

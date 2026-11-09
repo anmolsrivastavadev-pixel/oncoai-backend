@@ -1,3 +1,4 @@
+/* global document */
 // End-to-end smoke test against a REAL backend (no mocks).
 //   backend on :8000, `vite preview --port 5173`, then: node e2e/full-flow.mjs <image.jpg>
 // Takes screenshots into ./screenshots and exits non-zero on the first failed step.
