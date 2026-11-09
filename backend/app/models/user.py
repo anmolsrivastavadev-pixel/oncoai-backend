@@ -1,26 +1,37 @@
-from sqlalchemy import Column, Integer, String, Boolean, Text, DateTime
-from sqlalchemy.orm import relationship
-from app.db.session import Base
+from __future__ import annotations
+
+from datetime import date
+from typing import TYPE_CHECKING
+
+from sqlalchemy import CheckConstraint, Date, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.db.base import Base, TimestampMixin
+from app.models.enums import Role, check_in
+
+if TYPE_CHECKING:
+    from app.models.lesion import Lesion
 
 
-class User(Base):
+class User(TimestampMixin, Base):
     __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint(check_in("role", Role), name="role"),
+        CheckConstraint(
+            "skin_type IS NULL OR skin_type IN ('I','II','III','IV','V','VI')", name="skin_type"
+        ),
+    )
 
-    id = Column(Integer, primary_key=True, index=True)
-    full_name = Column(String, index=True)
-    email = Column(String, unique=True, index=True, nullable=False)
-    hashed_password = Column(String, nullable=False)
-    is_active = Column(Boolean(), default=True)
-    is_superuser = Column(Boolean(), default=False)
-    bio = Column(Text, nullable=True)
-    support_badges = Column(String, nullable=True)
-    profile_photo_url = Column(String, nullable=True)
-    strike_count = Column(Integer, default=0)
-    last_strike_at = Column(DateTime(timezone=True), nullable=True)
-    moderation_notes = Column(Text, nullable=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+    hashed_password: Mapped[str] = mapped_column(String(100))
+    full_name: Mapped[str] = mapped_column(String(120))
+    date_of_birth: Mapped[date | None] = mapped_column(Date)
+    skin_type: Mapped[str | None] = mapped_column(String(3))
+    location: Mapped[str | None] = mapped_column(String(120))
+    bio: Mapped[str | None] = mapped_column(Text)
+    role: Mapped[str] = mapped_column(String(20), default=Role.user.value, server_default="user")
 
-    scans = relationship("Scan", back_populates="owner", cascade="all, delete-orphan")
-    posts = relationship("Post", back_populates="author", cascade="all, delete-orphan", foreign_keys="Post.user_id")
-    comments = relationship("Comment", back_populates="author", cascade="all, delete-orphan", foreign_keys="Comment.user_id")
-    appointments = relationship("Appointment", back_populates="user", cascade="all, delete-orphan")
-    reactions = relationship("PostReaction", back_populates="user", cascade="all, delete-orphan")
+    lesions: Mapped[list[Lesion]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", passive_deletes=True
+    )
