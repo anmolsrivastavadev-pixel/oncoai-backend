@@ -93,3 +93,27 @@ jobs:
           name: oncoai-debug-apk
           path: frontend/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start the stack (CV-only image to keep the build small)
+        env:
+          INSTALL_ML: "0"
+          FETCH_MODEL: "0"
+        run: docker compose up -d --build
+      - name: Wait for the API and smoke-test it
+        run: |
+          for i in $(seq 1 40); do
+            curl -fsS http://localhost:8000/health && break
+            sleep 3
+          done
+          curl -fsS http://localhost:8000/health | grep '"db":"ok"'
+          docker compose exec -T backend id -un | grep -x oncoai
+          curl -fsS -X POST http://localhost:8000/api/v1/auth/register \
+            -H 'content-type: application/json' \
+            -d '{"email":"smoke@example.com","password":"Smoke-test1","full_name":"Smoke Test"}' | grep access_token
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --no-color | tail -100
