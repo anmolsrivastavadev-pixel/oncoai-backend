@@ -1,316 +1,301 @@
-from typing import Any, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+from fastapi import HTTPException, Response, status
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
-from app import models, schemas
-from app.api import deps
-from app.db.session import get_db
-from app.api.v1.notifications import create_notification
 
-router = APIRouter()
+from app.api.deps import DB, CurrentUser, Paging
+from app.api.router import SlashRouter
+from app.models import Comment, Post, Reaction, Report, User
+from app.models.enums import ContentStatus, PostTopic, ReactionKind, ReportStatus, Role
+from app.schemas.common import Page
+from app.schemas.community import (
+    Author,
+    CommentCreate,
+    CommentOut,
+    PostCreate,
+    PostDetail,
+    PostOut,
+    ReactionCounts,
+    ReactionIn,
+    ReactionsOut,
+    ReportCreated,
+    ReportIn,
+)
+from app.services.moderation import (
+    ANONYMOUS_NAME,
+    AUTO_HIDE_REPORTS,
+    PRIVACY_MESSAGE,
+    contains_contact_details,
+    display_name,
+    mask_profanity,
+)
 
-VALID_CATEGORIES = [
-    "Journey Updates", "Emotional Support", "Scan Discussions",
-    "Awareness", "Milestones", "Education",
-]
+router = SlashRouter(prefix="/community", tags=["community"])
 
-VALID_REACTIONS = ["support", "strength", "hope", "helpful", "encouragement"]
-
-DENIED_KEYWORDS = [
-    "guaranteed cure", "miracle cure", "natural cure for cancer",
-    "alternative medicine cures", "essential oils cure cancer",
-    "skip chemo", "don't trust doctors", "big pharma conspiracy",
-    "cancer is fake", "cure cancer naturally guaranteed",
-    "stop your medication", "stop treatment", "home remedy cures cancer",
-    "doctors are lying", "chemotherapy is poison", "cancer is a hoax",
-    "secret cure", "they don't want you to know",
-    "herbal cure cancer", "holistic cure cancer", "cannabis cures cancer",
-    "cure without chemo", "refuse treatment", "doctors kill patients",
-    "modern medicine is poison", "pharma kills",
-]
-
-MILD_WARNING_KEYWORDS = [
-    "alternative treatment", "natural remedy", "supplement helped",
-    "detox cured", "diet cured my",
-]
-
-
-def _check_safety(text: str) -> bool:
-    lower = text.lower()
-    return any(kw in lower for kw in DENIED_KEYWORDS)
+MODERATOR_ROLES = {Role.moderator.value, Role.admin.value}
 
 
-def _check_mild_warning(text: str) -> bool:
-    lower = text.lower()
-    return any(kw in lower for kw in MILD_WARNING_KEYWORDS)
+def is_moderator(user: User) -> bool:
+    return user.role in MODERATOR_ROLES
 
 
-def _build_post_response(post: models.Post, current_user_id: Optional[int] = None) -> dict:
-    reaction_counts = {}
-    for r in post.reactions:
-        reaction_counts[r.reaction_type] = reaction_counts.get(r.reaction_type, 0) + 1
+def _clean(*texts: str) -> list[str]:
+    if any(contains_contact_details(t) for t in texts):
+        raise HTTPException(422, PRIVACY_MESSAGE)
+    return [mask_profanity(t.strip()) for t in texts]
 
-    user_reaction = None
-    if current_user_id:
-        for r in post.reactions:
-            if r.user_id == current_user_id:
-                user_reaction = r.reaction_type
-                break
 
-    content = post.content
-    if _check_mild_warning(content) and not post.is_flagged:
-        content = (
-            content
-            + "\n\n\u2139\ufe0f Note: This post mentions approaches that may not be scientifically verified. "
-            + "Always consult your medical team before changing your treatment plan."
+def _author(db: Session, user_id: int, anonymous: bool, names: dict[int, str] | None = None) -> Author:
+    if anonymous:
+        return Author(id=None, display_name=ANONYMOUS_NAME)
+    if names is not None and user_id in names:
+        return Author(id=user_id, display_name=names[user_id])
+    user = db.get(User, user_id)
+    return Author(id=user_id, display_name=display_name(user.full_name) if user else "Member")
+
+
+def _reaction_state(db: Session, post_ids: list[int], viewer_id: int) -> tuple[dict[int, ReactionCounts], dict[int, list[str]]]:
+    counts: dict[int, ReactionCounts] = {pid: ReactionCounts() for pid in post_ids}
+    mine: dict[int, list[str]] = {pid: [] for pid in post_ids}
+    if not post_ids:
+        return counts, mine
+    for post_id, kind, n in db.execute(
+        select(Reaction.post_id, Reaction.kind, func.count(Reaction.id))
+        .where(Reaction.post_id.in_(post_ids))
+        .group_by(Reaction.post_id, Reaction.kind)
+    ).all():
+        setattr(counts[post_id], kind, n)
+    for post_id, kind in db.execute(
+        select(Reaction.post_id, Reaction.kind).where(Reaction.post_id.in_(post_ids), Reaction.user_id == viewer_id)
+    ).all():
+        mine[post_id].append(kind)
+    for kinds in mine.values():
+        kinds.sort(key=[k.value for k in ReactionKind].index)
+    return counts, mine
+
+
+def _posts_out(db: Session, posts: list[Post], viewer: User) -> list[PostOut]:
+    ids = [p.id for p in posts]
+    counts, mine = _reaction_state(db, ids, viewer.id)
+    comment_counts: dict[int, int] = {}
+    if ids:
+        comment_counts = dict(
+            db.execute(
+                select(Comment.post_id, func.count(Comment.id))
+                .where(Comment.post_id.in_(ids), Comment.status == ContentStatus.visible.value)
+                .group_by(Comment.post_id)
+            ).all()
         )
-
-    return {
-        "id": post.id,
-        "title": post.title,
-        "content": content,
-        "category": post.category,
-        "image_url": post.image_url,
-        "is_flagged": post.is_flagged,
-        "pinned": post.pinned,
-        "created_at": post.created_at,
-        "user_id": None if post.is_anonymous else post.user_id,
-        "author_name": "Community Member" if post.is_anonymous else (post.author.full_name if post.author else None),
-        "comment_count": len(post.comments),
-        "reaction_counts": reaction_counts,
-        "user_reaction": user_reaction,
-        "group_id": post.group_id,
-        "is_anonymous": post.is_anonymous,
-        "comments": [],
-    }
-
-
-@router.get("/guidelines")
-def get_guidelines() -> Any:
-    return {
-        "guidelines": [
-            "Be kind and supportive — everyone here is on a personal journey.",
-            "Share your experiences, but never offer medical diagnoses.",
-            "Report harmful content using the flag option on any post.",
-            "This is an educational space — always consult your doctor for medical decisions.",
-            "Respect privacy. Do not share others' personal health information.",
-            "Misinformation about cancer treatments will be removed immediately.",
-            "No harassment, hate speech, or discrimination of any kind.",
-            "Do not impersonate medical professionals.",
-            "Sensitive images must be marked appropriately.",
-        ],
-        "disclaimer": "OncoAI Community is an educational support platform only. Always consult your medical team for health decisions.",
-    }
-
-
-@router.get("/posts")
-def read_posts(
-    db: Session = Depends(get_db),
-    skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
-    category: Optional[str] = None,
-    sort: Optional[str] = "recent",
-    group_id: Optional[int] = None,
-) -> Any:
-    query = db.query(models.Post).filter(models.Post.is_hidden == False)
-
-    if category and category in VALID_CATEGORIES:
-        query = query.filter(models.Post.category == category)
-    if group_id:
-        query = query.filter(models.Post.group_id == group_id)
-
-    if sort == "supported":
-        posts = query.order_by(models.Post.pinned.desc()).all()
-        posts.sort(key=lambda p: len(p.reactions), reverse=True)
-        posts = posts[skip : skip + limit]
-    else:
-        posts = (
-            query.order_by(models.Post.pinned.desc(), models.Post.created_at.desc())
-            .offset(skip)
-            .limit(limit)
-            .all()
+    author_ids = {p.user_id for p in posts if not p.anonymous}
+    names = {
+        u.id: display_name(u.full_name)
+        for u in db.scalars(select(User).where(User.id.in_(author_ids))).all()
+    } if author_ids else {}
+    return [
+        PostOut(
+            id=p.id,
+            title=p.title,
+            body=p.body,
+            topic=p.topic,
+            author=_author(db, p.user_id, p.anonymous, names),
+            created_at=p.created_at,
+            comment_count=comment_counts.get(p.id, 0),
+            reactions=counts[p.id],
+            my_reactions=mine[p.id],
+            is_mine=p.user_id == viewer.id,
+            status="removed" if p.status == ContentStatus.removed.value else "visible",
+            under_review=p.status == ContentStatus.hidden.value,
         )
-
-    return [_build_post_response(p) for p in posts]
-
-
-@router.get("/posts/{post_id}")
-def read_post(post_id: int, db: Session = Depends(get_db)) -> Any:
-    post = db.query(models.Post).filter(models.Post.id == post_id).first()
-    if not post or post.is_hidden:
-        raise HTTPException(status_code=404, detail="Post not found")
-
-    result = _build_post_response(post)
-    comments = []
-    for c in post.comments:
-        comment_content = c.content
-        if c.is_flagged:
-            comment_content = "[This comment has been flagged for review] " + comment_content
-        if _check_mild_warning(c.content) and not c.is_flagged:
-            comment_content = comment_content + "\n\n\u2139\ufe0f This comment mentions approaches that may not be scientifically verified."
-        comments.append({
-            "id": c.id, "content": comment_content, "created_at": c.created_at,
-            "user_id": c.user_id, "author_name": c.author.full_name if c.author else None,
-            "is_flagged": c.is_flagged,
-        })
-    result["comments"] = comments
-    return result
+        for p in posts
+    ]
 
 
-@router.post("/posts")
-def create_post(
-    *,
-    db: Session = Depends(get_db),
-    post_in: schemas.post.PostCreate,
-    current_user: models.User = Depends(deps.get_current_user),
-) -> Any:
-    if current_user.strike_count >= 2:
-        raise HTTPException(status_code=403, detail="Your account is temporarily restricted.")
-
-    if post_in.category not in VALID_CATEGORIES:
-        raise HTTPException(status_code=400, detail="Invalid category")
-
-    if post_in.group_id:
-        group = db.query(models.Group).filter(models.Group.id == post_in.group_id).first()
-        if not group:
-            raise HTTPException(status_code=400, detail="Group not found")
-
-    is_flagged = _check_safety(post_in.title) or _check_safety(post_in.content)
-
-    post = models.Post(
-        title=post_in.title, content=post_in.content, category=post_in.category,
-        image_url=post_in.image_url, is_flagged=is_flagged,
-        flag_reason="Auto-flagged: potential misinformation keywords" if is_flagged else None,
-        user_id=current_user.id, group_id=post_in.group_id,
-        is_anonymous=post_in.is_anonymous,
+def _comment_out(db: Session, c: Comment, viewer: User) -> CommentOut:
+    return CommentOut(
+        id=c.id,
+        post_id=c.post_id,
+        body=c.body,
+        author=_author(db, c.user_id, c.anonymous),
+        created_at=c.created_at,
+        is_mine=c.user_id == viewer.id,
     )
+
+
+def get_viewable_post(db: Session, post_id: int, viewer: User) -> Post:
+    post = db.get(Post, post_id)
+    if post is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Post not found")
+    if post.status == ContentStatus.visible.value or is_moderator(viewer):
+        return post
+    if post.status == ContentStatus.hidden.value and post.user_id == viewer.id:
+        return post
+    raise HTTPException(status.HTTP_404_NOT_FOUND, "Post not found")
+
+
+def _interactive_post(db: Session, post_id: int, viewer: User) -> Post:
+    post = get_viewable_post(db, post_id, viewer)
+    if post.status != ContentStatus.visible.value:
+        raise HTTPException(status.HTTP_409_CONFLICT, "This post is not open for interaction.")
+    return post
+
+
+@router.get("/posts", response_model=Page[PostOut])
+def list_posts(user: CurrentUser, db: DB, paging: Paging, topic: PostTopic | None = None) -> Page[PostOut]:
+    conditions = [
+        or_(
+            Post.status == ContentStatus.visible.value,
+            (Post.status == ContentStatus.hidden.value) & (Post.user_id == user.id),
+        )
+    ]
+    if topic is not None:
+        conditions.append(Post.topic == topic.value)
+    total = db.scalar(select(func.count(Post.id)).where(*conditions)) or 0
+    posts = db.scalars(
+        select(Post).where(*conditions).order_by(Post.created_at.desc(), Post.id.desc()).limit(paging.limit).offset(paging.offset)
+    ).all()
+    return Page(items=_posts_out(db, list(posts), user), total=total)
+
+
+@router.post("/posts", response_model=PostOut, status_code=status.HTTP_201_CREATED)
+def create_post(payload: PostCreate, user: CurrentUser, db: DB) -> PostOut:
+    title, body = _clean(payload.title, payload.body)
+    post = Post(user_id=user.id, title=title, body=body, topic=payload.topic.value, anonymous=payload.anonymous)
     db.add(post)
     db.commit()
     db.refresh(post)
-    post = db.query(models.Post).filter(models.Post.id == post.id).first()
-    return _build_post_response(post, current_user.id)
+    return _posts_out(db, [post], user)[0]
 
 
-@router.delete("/posts/{post_id}")
-def delete_post(post_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(deps.get_current_user)) -> Any:
-    post = db.query(models.Post).filter(models.Post.id == post_id).first()
-    if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
-    if post.user_id != current_user.id and not current_user.is_superuser:
-        raise HTTPException(status_code=403, detail="Not authorized")
-    db.delete(post)
-    db.commit()
-    return {"detail": "Post deleted"}
+@router.get("/posts/{post_id}", response_model=PostDetail)
+def read_post(post_id: int, user: CurrentUser, db: DB) -> PostDetail:
+    post = get_viewable_post(db, post_id, user)
+    comments = db.scalars(
+        select(Comment)
+        .where(Comment.post_id == post.id, Comment.status == ContentStatus.visible.value)
+        .order_by(Comment.created_at.asc(), Comment.id.asc())
+        .limit(500)
+    ).all()
+    out = _posts_out(db, [post], user)[0]
+    return PostDetail(**out.model_dump(), comments=[_comment_out(db, c, user) for c in comments])
 
 
-@router.post("/posts/{post_id}/react")
-def react_to_post(
-    post_id: int, reaction_in: schemas.reaction.ReactionCreate,
-    db: Session = Depends(get_db), current_user: models.User = Depends(deps.get_current_user),
-) -> Any:
-    if reaction_in.reaction_type not in VALID_REACTIONS:
-        raise HTTPException(status_code=400, detail="Invalid reaction type")
-
-    post = db.query(models.Post).filter(models.Post.id == post_id).first()
-    if not post or post.is_hidden:
-        raise HTTPException(status_code=404, detail="Post not found")
-
-    existing = db.query(models.PostReaction).filter(
-        models.PostReaction.post_id == post_id,
-        models.PostReaction.user_id == current_user.id,
-        models.PostReaction.reaction_type == reaction_in.reaction_type,
-    ).first()
-
-    if existing:
-        db.delete(existing)
-        db.commit()
+@router.delete("/posts/{post_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_post(post_id: int, user: CurrentUser, db: DB) -> Response:
+    post = get_viewable_post(db, post_id, user)
+    if post.user_id == user.id:
+        db.delete(post)
+    elif is_moderator(user):
+        post.status = ContentStatus.removed.value
+        _close_reports(db, user, post_id=post.id, outcome=ReportStatus.actioned)
     else:
-        reaction = models.PostReaction(post_id=post_id, user_id=current_user.id, reaction_type=reaction_in.reaction_type)
-        db.add(reaction)
-        db.commit()
-        if post.user_id != current_user.id:
-            create_notification(db, post.user_id, "reaction",
-                f"{current_user.full_name} sent you {reaction_in.reaction_type} on your post", "post", post.id)
-            db.commit()
-
-    post = db.query(models.Post).filter(models.Post.id == post_id).first()
-    return _build_post_response(post, current_user.id)
-
-
-@router.delete("/posts/{post_id}/react/{reaction_type}")
-def remove_reaction(post_id: int, reaction_type: str, db: Session = Depends(get_db), current_user: models.User = Depends(deps.get_current_user)) -> Any:
-    reaction = db.query(models.PostReaction).filter(
-        models.PostReaction.post_id == post_id,
-        models.PostReaction.user_id == current_user.id,
-        models.PostReaction.reaction_type == reaction_type,
-    ).first()
-    if not reaction:
-        raise HTTPException(status_code=404, detail="Reaction not found")
-    db.delete(reaction)
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "You can only delete your own posts.")
     db.commit()
-    return {"detail": "Reaction removed"}
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.get("/posts/{post_id}/comments")
-def read_comments(post_id: int, db: Session = Depends(get_db)) -> Any:
-    post = db.query(models.Post).filter(models.Post.id == post_id).first()
-    if not post or post.is_hidden:
-        raise HTTPException(status_code=404, detail="Post not found")
-    return [{
-        "id": c.id, "content": c.content, "created_at": c.created_at,
-        "user_id": c.user_id, "post_id": c.post_id,
-        "author_name": c.author.full_name if c.author else None, "is_flagged": c.is_flagged,
-    } for c in post.comments]
-
-
-@router.post("/posts/{post_id}/comments")
-def create_comment(
-    post_id: int, comment_in: schemas.post.CommentContent,
-    db: Session = Depends(get_db), current_user: models.User = Depends(deps.get_current_user),
-) -> Any:
-    if current_user.strike_count >= 2:
-        raise HTTPException(status_code=403, detail="Your account is temporarily restricted.")
-
-    post = db.query(models.Post).filter(models.Post.id == post_id).first()
-    if not post or post.is_hidden:
-        raise HTTPException(status_code=404, detail="Post not found")
-
-    is_flagged = _check_safety(comment_in.content)
-    comment = models.Comment(content=comment_in.content, post_id=post_id, user_id=current_user.id, is_flagged=is_flagged)
+@router.post("/posts/{post_id}/comments", response_model=CommentOut, status_code=status.HTTP_201_CREATED)
+def create_comment(post_id: int, payload: CommentCreate, user: CurrentUser, db: DB) -> CommentOut:
+    post = _interactive_post(db, post_id, user)
+    (body,) = _clean(payload.body)
+    comment = Comment(post_id=post.id, user_id=user.id, body=body, anonymous=payload.anonymous)
     db.add(comment)
     db.commit()
     db.refresh(comment)
-
-    if post.user_id != current_user.id:
-        create_notification(db, post.user_id, "comment",
-            f"{current_user.full_name} commented on your post", "post", post.id)
-        db.commit()
-
-    return {
-        "id": comment.id, "content": comment.content, "created_at": comment.created_at,
-        "user_id": comment.user_id, "post_id": comment.post_id,
-        "author_name": current_user.full_name, "is_flagged": comment.is_flagged,
-    }
+    return _comment_out(db, comment, user)
 
 
-@router.delete("/comments/{comment_id}")
-def delete_comment(comment_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(deps.get_current_user)) -> Any:
-    comment = db.query(models.Comment).filter(models.Comment.id == comment_id).first()
-    if not comment:
-        raise HTTPException(status_code=404, detail="Comment not found")
-    if comment.user_id != current_user.id and not current_user.is_superuser:
-        raise HTTPException(status_code=403, detail="Not authorized")
-    db.delete(comment)
+def _get_comment(db: Session, comment_id: int, viewer: User) -> Comment:
+    comment = db.get(Comment, comment_id)
+    if comment is None or (comment.status != ContentStatus.visible.value and not is_moderator(viewer)):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Comment not found")
+    get_viewable_post(db, comment.post_id, viewer)
+    return comment
+
+
+@router.delete("/comments/{comment_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_comment(comment_id: int, user: CurrentUser, db: DB) -> Response:
+    comment = _get_comment(db, comment_id, user)
+    if comment.user_id == user.id:
+        db.delete(comment)
+    elif is_moderator(user):
+        comment.status = ContentStatus.removed.value
+        _close_reports(db, user, comment_id=comment.id, outcome=ReportStatus.actioned)
+    else:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "You can only delete your own comments.")
     db.commit()
-    return {"detail": "Comment deleted"}
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/posts/{post_id}/flag")
-def flag_post(post_id: int, flag_in: schemas.post.FlagCreate, db: Session = Depends(get_db), current_user: models.User = Depends(deps.get_current_user)) -> Any:
-    post = db.query(models.Post).filter(models.Post.id == post_id).first()
-    if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
-    post.is_flagged = True
-    post.flag_reason = flag_in.reason
-    post.flagged_by = current_user.id
+@router.post("/posts/{post_id}/reactions", response_model=ReactionsOut)
+def toggle_reaction(post_id: int, payload: ReactionIn, user: CurrentUser, db: DB) -> ReactionsOut:
+    post = _interactive_post(db, post_id, user)
+    existing = db.scalar(
+        select(Reaction).where(Reaction.post_id == post.id, Reaction.user_id == user.id, Reaction.kind == payload.kind.value)
+    )
+    if existing is not None:
+        db.delete(existing)
+    else:
+        db.add(Reaction(post_id=post.id, user_id=user.id, kind=payload.kind.value))
     db.commit()
-    return {"detail": "Post flagged for moderation"}
+    counts, mine = _reaction_state(db, [post.id], user.id)
+    return ReactionsOut(reactions=counts[post.id], my_reactions=mine[post.id])
+
+
+def _open_report_count(db: Session, *, post_id: int | None = None, comment_id: int | None = None) -> int:
+    target = Report.post_id == post_id if post_id is not None else Report.comment_id == comment_id
+    return db.scalar(select(func.count(Report.id)).where(target, Report.status == ReportStatus.open.value)) or 0
+
+
+def _close_reports(
+    db: Session, moderator: User, *, outcome: ReportStatus, post_id: int | None = None, comment_id: int | None = None
+) -> None:
+    target = Report.post_id == post_id if post_id is not None else Report.comment_id == comment_id
+    for report in db.scalars(select(Report).where(target, Report.status == ReportStatus.open.value)):
+        report.status = outcome.value
+        report.resolved_by_id = moderator.id
+        report.resolved_at = datetime.now(UTC)
+
+
+def _file_report(db: Session, reporter: User, reason: str, *, post: Post | None = None, comment: Comment | None = None) -> ReportCreated:
+    target = Report.post_id == post.id if post is not None else Report.comment_id == comment.id  # type: ignore[union-attr]
+    existing = db.scalar(
+        select(Report).where(target, Report.reporter_id == reporter.id, Report.status == ReportStatus.open.value)
+    )
+    if existing is not None:
+        return ReportCreated(id=existing.id)
+    report = Report(
+        reporter_id=reporter.id,
+        post_id=post.id if post is not None else None,
+        comment_id=comment.id if comment is not None else None,
+        reason=reason.strip(),
+    )
+    db.add(report)
+    db.flush()
+    content = post if post is not None else comment
+    assert content is not None
+    open_count = _open_report_count(
+        db, post_id=post.id if post is not None else None, comment_id=comment.id if comment is not None else None
+    )
+    if open_count >= AUTO_HIDE_REPORTS and content.status == ContentStatus.visible.value:
+        content.status = ContentStatus.hidden.value
+    db.commit()
+    return ReportCreated(id=report.id)
+
+
+@router.post("/posts/{post_id}/report", response_model=ReportCreated, status_code=status.HTTP_201_CREATED)
+def report_post(post_id: int, payload: ReportIn, user: CurrentUser, db: DB) -> ReportCreated:
+    post = get_viewable_post(db, post_id, user)
+    if post.user_id == user.id:
+        raise HTTPException(422, "You can't report your own post.")
+    return _file_report(db, user, payload.reason, post=post)
+
+
+@router.post("/comments/{comment_id}/report", response_model=ReportCreated, status_code=status.HTTP_201_CREATED)
+def report_comment(comment_id: int, payload: ReportIn, user: CurrentUser, db: DB) -> ReportCreated:
+    comment = _get_comment(db, comment_id, user)
+    if comment.user_id == user.id:
+        raise HTTPException(422, "You can't report your own comment.")
+    return _file_report(db, user, payload.reason, comment=comment)

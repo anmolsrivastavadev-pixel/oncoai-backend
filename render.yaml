@@ -1,0 +1,49 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+# Dashboard → New → Blueprint → pick this repo. Creates the API, a PostgreSQL
+# database and a persistent disk for scan photos and the model.
+services:
+  - type: web
+    name: oncoai-api
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    # The PyTorch model needs roughly 1.5 GB RAM. On a smaller plan set
+    # ANALYZER_KIND=heuristic and FETCH_MODEL=0 (computer-vision-only analysis).
+    plan: standard
+    healthCheckPath: /health
+    autoDeploy: true
+    disk:
+      name: oncoai-data
+      mountPath: /data
+      sizeGB: 5
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: oncoai-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: IMAGE_ENCRYPTION_KEY
+        sync: false   # paste a Fernet key, see docs/DEPLOY.md
+      - key: ANTHROPIC_API_KEY
+        sync: false   # optional; leave empty for the built-in knowledge base
+      - key: CORS_ORIGINS
+        value: capacitor://localhost,https://localhost,http://localhost
+      - key: UPLOAD_DIR
+        value: /data/uploads
+      - key: MODEL_DIR
+        value: /data/models/skin-lesion-vit
+      - key: FETCH_MODEL
+        value: "1"
+      - key: FORWARDED_ALLOW_IPS
+        value: "*"    # Render's proxy is the only way in, so its X-Forwarded-For is trusted
+      - key: SEED_SAMPLE_DATA
+        value: "true" # fictional sample dermatologists; set false once you have real listings
+
+databases:
+  - name: oncoai-db
+    databaseName: oncoai
+    user: oncoai
+    plan: basic-256mb

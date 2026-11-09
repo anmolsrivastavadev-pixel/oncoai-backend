@@ -39,3 +39,21 @@ node_modules/
 .vscode/
 *.swp
 *.swo
+
+# OncoAI platform rebuild
+.venv/
+**/.venv/
+**/__pycache__/
+.env
+**/.env
+!**/.env.example
+!**/.env.android
+backend/models/
+backend/uploads/
+**/uploads/
+.pytest_cache/
+.ruff_cache/
+*.log
+frontend/android/app/build/
+frontend/android/build/
+frontend/android/.gradle/

@@ -1,101 +1,46 @@
-from typing import Any
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from app import models, schemas
-from app.api import deps
-from app.db.session import get_db
+from __future__ import annotations
 
-router = APIRouter()
+from fastapi import HTTPException, Response, status
 
+from app.api.deps import DB, CurrentUser
+from app.api.router import SlashRouter
+from app.core.security import hash_password, verify_password
+from app.models import User
+from app.schemas.user import PasswordChangeIn, UserOut, UserUpdate
+from app.services import storage
 
-@router.get("/profile")
-def get_my_profile(
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(deps.get_current_user),
-) -> Any:
-    user = db.query(models.User).filter(models.User.id == current_user.id).first()
-    return {
-        "id": user.id,
-        "full_name": user.full_name,
-        "email": user.email,
-        "bio": user.bio,
-        "support_badges": user.support_badges,
-        "profile_photo_url": user.profile_photo_url,
-        "is_superuser": user.is_superuser,
-        "strike_count": user.strike_count,
-        "post_count": len(user.posts),
-        "comment_count": len(user.comments),
-        "joined_date": user.posts[0].created_at.isoformat() if user.posts else None,
-    }
+router = SlashRouter(prefix="/users", tags=["users"])
 
 
-@router.patch("/profile")
-def update_profile(
-    *,
-    db: Session = Depends(get_db),
-    profile_in: dict,
-    current_user: models.User = Depends(deps.get_current_user),
-) -> Any:
-    user = db.query(models.User).filter(models.User.id == current_user.id).first()
-    allowed = ["bio", "support_badges", "full_name", "profile_photo_url"]
-    for field in allowed:
-        if field in profile_in:
-            setattr(user, field, profile_in[field])
+@router.get("/me", response_model=UserOut)
+def read_me(user: CurrentUser) -> User:
+    return user
+
+
+@router.patch("/me", response_model=UserOut)
+def update_me(payload: UserUpdate, user: CurrentUser, db: DB) -> User:
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        if field == "full_name" and value is None:
+            continue
+        setattr(user, field, value.strip() if isinstance(value, str) else value)
     db.commit()
-    return {"detail": "Profile updated"}
+    db.refresh(user)
+    return user
 
 
-@router.get("/milestones")
-def get_milestones(
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(deps.get_current_user),
-) -> Any:
-    post_count = len(current_user.posts)
-    scan_count = len(current_user.scans)
-    comment_count = len(current_user.comments)
+@router.post("/me/password", status_code=status.HTTP_204_NO_CONTENT)
+def change_password(payload: PasswordChangeIn, user: CurrentUser, db: DB) -> Response:
+    if not verify_password(payload.current_password, user.hashed_password):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is incorrect.")
+    user.hashed_password = hash_password(payload.new_password)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    milestones = [
-        {
-            "key": "first_post",
-            "label": "First Voice",
-            "description": "Created your first community post",
-            "achieved": post_count >= 1,
-            "progress": min(1.0, post_count / 1),
-        },
-        {
-            "key": "ten_posts",
-            "label": "Community Contributor",
-            "description": "Published 10 posts",
-            "achieved": post_count >= 10,
-            "progress": min(1.0, post_count / 10),
-        },
-        {
-            "key": "fifty_posts",
-            "label": "Community Leader",
-            "description": "Published 50 posts",
-            "achieved": post_count >= 50,
-            "progress": min(1.0, post_count / 50),
-        },
-        {
-            "key": "first_scan",
-            "label": "First Insight",
-            "description": "Completed your first skin scan",
-            "achieved": scan_count >= 1,
-            "progress": min(1.0, scan_count / 1),
-        },
-        {
-            "key": "ten_scans",
-            "label": "Diligent Monitor",
-            "description": "Completed 10 skin scans",
-            "achieved": scan_count >= 10,
-            "progress": min(1.0, scan_count / 10),
-        },
-        {
-            "key": "supportive",
-            "label": "Supportive Soul",
-            "description": "Left 25 comments supporting others",
-            "achieved": comment_count >= 25,
-            "progress": min(1.0, comment_count / 25),
-        },
-    ]
-    return milestones
+
+@router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
+def delete_me(user: CurrentUser, db: DB) -> Response:
+    user_id = user.id
+    db.delete(user)
+    db.commit()
+    storage.delete_user_files(user_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

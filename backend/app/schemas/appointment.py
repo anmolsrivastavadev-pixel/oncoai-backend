@@ -1,28 +1,35 @@
-from pydantic import BaseModel
-from datetime import datetime
-from typing import Optional
-from .doctor import Doctor
+from __future__ import annotations
 
-class AppointmentBase(BaseModel):
-    doctor_id: int
-    appointment_datetime: datetime
-    consultation_type: str = "in-person"
-    notes: Optional[str] = None
+from datetime import date as Date
+from typing import Literal
 
-class AppointmentCreate(AppointmentBase):
-    pass
+from pydantic import BaseModel, Field
+
+from app.schemas.common import ORMModel, UTCDateTime
+from app.schemas.dermatologist import DermatologistOut
+
+TIME_PATTERN = r"^([01]\d|2[0-3]):[0-5]\d$"
+
+
+class AppointmentCreate(BaseModel):
+    dermatologist_id: int
+    date: Date
+    time: str = Field(pattern=TIME_PATTERN)
+    reason: str = Field(min_length=1, max_length=1000)
+    scan_id: int | None = None
+
 
 class AppointmentUpdate(BaseModel):
-    status: Optional[str] = None
-    appointment_datetime: Optional[datetime] = None
-    notes: Optional[str] = None
+    date: Date | None = None
+    time: str | None = Field(default=None, pattern=TIME_PATTERN)
+    reason: str | None = Field(default=None, min_length=1, max_length=1000)
 
-class Appointment(AppointmentBase):
+
+class AppointmentOut(ORMModel):
     id: int
-    user_id: int
-    status: str
-    created_at: datetime
-    doctor: Optional[Doctor] = None
-
-    class Config:
-        from_attributes = True
+    dermatologist: DermatologistOut
+    scheduled_at: UTCDateTime
+    reason: str
+    status: Literal["booked", "cancelled", "completed"]
+    scan_id: int | None
+    created_at: UTCDateTime
