@@ -72,7 +72,7 @@ YOUR PRIVACY
 • Your photos and health notes are private to your account and are never shown to other users.
 • Photos are encrypted at rest and sent only over secure connections.
 • No ads, and we never sell your data.
-• Delete individual photos, or your whole account and all of its data, at any time from Settings.
+• Delete individual photos, or your whole account and all of its data, at any time from your Profile.
 
 Read our privacy policy: [https://oncoai.app/privacy]
 

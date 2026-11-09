@@ -42,7 +42,9 @@ You can choose to add the following. You can leave any of it blank and edit or r
 ### 2.3 Skin photos (sensitive)
 When you add a photo of a spot on your skin, using the camera or your gallery:
 - The photo is uploaded to our servers over an encrypted (HTTPS) connection.
-- Before we store the photo, we **remove all embedded metadata**, including EXIF data, GPS location,
+- Before the photo is uploaded, the app removes embedded metadata [CONFIRM once on-device EXIF
+  stripping ships, see the Data Safety form note 1]. Our servers remove it again before storing:
+  we **remove all embedded metadata**, including EXIF data, GPS location,
   camera details and comments. We keep only the image pixels.
 - We store the photo and a small thumbnail in private storage linked to your account, **encrypted
   at rest**. [CONFIRM: production sets `IMAGE_ENCRYPTION_KEY`.] Photos are never published and can
@@ -73,14 +75,18 @@ health details in the community that you would not want other people to read.
 
 ### 2.6 Assistant conversations
 If you use the educational assistant, we process the messages you send and the replies. When the
-assistant is powered by an AI provider (see section 5), your messages, and the results of a scan if
-you choose to attach one, are sent to that provider to generate the reply.
-[CONFIRM: whether chat history is stored on our servers, and for how long.]
+assistant is powered by an AI provider (see section 5), your most recent messages (up to 12) are sent
+to that provider to generate the reply. If you choose to attach a photo entry, a text summary of its
+visual measurements is sent too. Your photo, name and email address are never sent.
+**We don't store assistant conversations on our servers.** They are processed only to produce
+the reply, and the app keeps the conversation on screen.
 
 ### 2.7 Technical information
-- **IP address**, used briefly for security and rate limiting (for example, limiting login attempts).
-- **Server logs**: request times, request IDs and error details, used to keep the Service secure and
-  working. [CONFIRM: retention period, e.g. 30 days.]
+- **IP address**, held briefly in memory for security and rate limiting (for example, limiting login
+  attempts). It is not written to our logs or database.
+- **Server logs**: request times, request IDs, the address requested and error details, used to keep
+  the Service secure and working. Logs don't include your IP address, password or photos.
+  [CONFIRM: retention period, e.g. 30 days.]
 - **On your device**, the app stores your sign-in tokens in the app's private storage (Android
   SharedPreferences) so you stay signed in. It also schedules reminder notifications locally.
 
@@ -88,15 +94,15 @@ you choose to attach one, are sent to that provider to generate the reply.
 - We do not use advertising IDs and we do not show ads.
 - We do not collect your precise device location.
 - We do not read your contacts, and we do not access photos you have not chosen to upload.
-- We do not use third-party analytics or crash-reporting SDKs. [CONFIRM against the final Android
-  build. Update this section if any are added.]
+- We do not use third-party analytics, advertising or crash-reporting SDKs. (Checked against the
+  Android build at `55d1bac`. Update this section if any are added.)
 
 ## 3. Device permissions
 
 | Permission | Why | When |
 |---|---|---|
 | Camera | To take a photo of a spot you want to track | Only when you tap to take a photo |
-| Photos / media (system picker) | To pick an existing photo | Only when you choose "from gallery" |
+| None: Android system photo picker | To pick an existing photo. The picker gives OncoAI only the photo you select, never the rest of your library | Only when you choose "from gallery" |
 | Notifications | To show reminders you set (re-checks, appointments) | Asked when you first create a reminder |
 
 You can withdraw any permission at any time in Android Settings. The rest of the app keeps working.
@@ -131,9 +137,10 @@ that require them to protect it and to use it only to provide their service to u
 | Anthropic PBC (Claude API), *if the AI assistant is enabled* | Generating assistant replies | Assistant messages, and scan results you choose to attach |
 | [EMAIL PROVIDER, if used] | Account emails | Email address |
 
-Dermatologist and clinic listings are shown for information only. [CONFIRM: whether appointment
-requests are sent to the clinic. If they are, name this as sharing, describe what is sent, and get
-the user's consent at booking.]
+Dermatologist and clinic listings are shown for information only. Appointments you record in OncoAI
+are stored only in your OncoAI account and are **not sent to any clinic**. You still need to book
+with the clinic directly. [If a real booking integration is added later, name it here as sharing,
+describe what is sent, and get consent at booking.]
 
 We may also disclose information if the law requires it, to protect someone's safety, or as part of
 a merger or acquisition. In that case, the new owner must follow this policy.
@@ -150,13 +157,13 @@ States.]
 |---|---|
 | Account, profile, photos, tracking, appointments, reminders | Until you delete them or delete your account |
 | Community posts and comments | Until you or a moderator delete them, or you delete your account |
-| Assistant conversations | [CONFIRM] |
+| Assistant conversations | Not stored on our servers. The AI provider's retention follows its API terms: [CONFIRM, e.g. "deleted within 30 days and not used for training"] |
 | Server logs and security records | [30] days |
 | Encrypted backups | Overwritten within [30] days of deletion |
 
 ## 8. Deleting your data and your account
 
-**In the app:** go to **Settings → Account → Delete account**. This permanently deletes your account,
+**In the app:** go to **Profile → Delete account**. This permanently deletes your account,
 profile, all skin photos and thumbnails, tracked spots, scans, symptom logs, appointments, reminders,
 community posts, comments and reactions. You can also delete individual photos, scans, spots and
 reminders at any time.

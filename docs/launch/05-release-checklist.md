@@ -3,8 +3,22 @@
 > **OncoAI is an educational skin health awareness platform and does not provide medical diagnosis or treatment advice.**
 
 App ID: `com.oncoai.app` (from `frontend/capacitor.config.ts`). Stack: React + Vite + Capacitor 6.
-The Android project lives in `frontend/android/` (not yet pushed when this checklist was written,
-so the Gradle paths below are the Capacitor defaults).
+The Android project is `frontend/android/`, reviewed at `oncoai-platform` `55d1bac`.
+
+## 0. Gaps found in the Android project at `55d1bac`
+
+These must be fixed in the app code. This session doesn't edit `frontend/`.
+
+| File | Now | Needed |
+|---|---|---|
+| `frontend/android/variables.gradle` | `compileSdkVersion = 34`, `targetSdkVersion = 34` | Raise to Play's current requirement, which is **at least 35** and will be 36 if the 2026 requirement is in force when you upload. Check the *Target API level requirements* page, then retest the edge-to-edge layout and notification permission behaviour |
+| `frontend/android/app/build.gradle` | `versionCode 1`, `versionName "1.0"` | `versionName "1.0.0"` to match `package.json`. Bump `versionCode` on every upload (section 3) |
+| `frontend/android/app/build.gradle` | `minifyEnabled false`. No `signingConfigs` | `minifyEnabled true`, `shrinkResources true`, check the Capacitor/WebView keep rules. Add a release `signingConfig` read from `keystore.properties` or env (section 2) |
+| `AndroidManifest.xml` | `READ_MEDIA_IMAGES`, `READ_EXTERNAL_STORAGE` (≤32) | **Remove both.** `@capacitor/camera` gallery selection goes through the system photo picker. Play's photo and video permissions policy rejects `READ_MEDIA_IMAGES` for occasional use |
+| `network_security_config.xml` | Cleartext allowed for `10.0.2.2` and `localhost` | Fine for dev. Better: use a release-only config with no exceptions |
+| `AndroidManifest.xml` | `allowBackup="false"` | ✅ Already OK (tokens are not backed up) |
+| `.gitignore` | No `*.jks` / `*.keystore` / `keystore.properties` rules | Add them before anyone creates an upload key in the repo |
+| App (`ProfilePage.tsx`) | Delete account ✅. No privacy policy link | Add a privacy policy link on sign-up and in Profile |
 
 ---
 

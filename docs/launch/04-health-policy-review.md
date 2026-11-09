@@ -121,7 +121,13 @@ healthcare professional for medical advice, diagnosis, or treatment."*:
 - [ ] Settings → About
 - [ ] store listing description and screenshots
 
-### 3.4 Assistant — **[Blocker once implemented]**
+### 3.4 Assistant — **[Blocker]**
+
+At `55d1bac` the assistant has input and output guardrails and a knowledge-base fallback, and it
+doesn't store chats. That's good. Two things must change along with 3.1:
+`claude_provider.SYSTEM_PROMPT` tells the model to explain "the app's educational concern levels
+(low / moderate / higher)". `service.scan_context_text` also sends the concern level and score.
+Remove both when concern levels are removed.
 
 The API contract's guardrails are a good start: no diagnosis, no treatment, urgent symptoms are
 redirected, self-harm leads to crisis resources. Also add:
@@ -167,8 +173,11 @@ redirected, self-harm leads to crisis resources. Also add:
 ### 3.8 Privacy and data — required
 
 - [ ] Privacy policy at a public HTML URL, linked on the sign-up screen and in Settings
-- [ ] In-app **Settings → Account → Delete account** using `DELETE /users/me`, with a clear
-      confirmation that lists what will be deleted
+- [x] In-app **Profile → Delete account** using `DELETE /users/me` (present at `55d1bac`). Check
+      that the confirmation lists what will be deleted
+- [ ] Remove `READ_MEDIA_IMAGES` / `READ_EXTERNAL_STORAGE` from the manifest and use the system photo
+      picker (Play photo and video permissions policy)
+- [ ] Strip EXIF on the device before upload (see `03-data-safety-form.md` note 1)
 - [ ] A public web deletion page that names "OncoAI"
 - [ ] `IMAGE_ENCRYPTION_KEY` **required** when `ENVIRONMENT=production` (today it's optional).
       Treat a missing key as a release blocker in deployment config
