@@ -110,7 +110,7 @@ jobs:
             sleep 3
           done
           curl -fsS http://localhost:8000/health | grep '"db":"ok"'
-          docker compose exec -T backend id -un | grep -x oncoai
+          docker compose exec -T backend stat -c %U /proc/1 | grep -x oncoai   # server runs unprivileged
           curl -fsS -X POST http://localhost:8000/api/v1/auth/register \
             -H 'content-type: application/json' \
             -d '{"email":"smoke@example.com","password":"Smoke-test1","full_name":"Smoke Test"}' | grep access_token
