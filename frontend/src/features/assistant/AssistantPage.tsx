@@ -124,8 +124,8 @@ export default function AssistantPage() {
         </div>
       </header>
 
-      <div className="sticky z-20 -mx-1 mb-3 px-1" style={{ top: 'calc(var(--safe-top) + 60px)' }}>
-        <Disclaimer variant="inline" className="bg-navy-900/90 backdrop-blur-xl" />
+      <div className="sticky z-20 -mx-1 mb-3 rounded-xl bg-navy-950 px-1 pb-1 shadow-[0_8px_16px_-4px_#050B1A]" style={{ top: 'calc(var(--safe-top) + 60px)' }}>
+        <Disclaimer variant="inline" />
       </div>
 
       {scanId && (
@@ -181,7 +181,7 @@ export default function AssistantPage() {
         <div ref={endRef} />
       </div>
 
-      <div className="sticky z-20 mt-4 space-y-2 bg-gradient-to-t from-navy-950 via-navy-950/95 to-transparent pt-4" style={{ bottom: 'calc(var(--bottom-nav-h) + var(--safe-bottom))' }}>
+      <div className="sticky z-20 mt-4 space-y-2 bg-navy-950 pb-2 pt-3 shadow-[0_-12px_16px_-4px_#050B1A]" style={{ bottom: 'calc(var(--bottom-nav-h) + var(--safe-bottom))' }}>
         <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 no-scrollbar" aria-label="Suggested questions">
           {(scanId && messages.length === 0 ? ['What do the features in my scan mean?', 'Should I show this scan to a dermatologist?', ...suggestions] : suggestions).slice(0, 6).map((s) => (
             <button key={s} type="button" onClick={() => ask(s)} disabled={sending} className="chip shrink-0 disabled:opacity-50">

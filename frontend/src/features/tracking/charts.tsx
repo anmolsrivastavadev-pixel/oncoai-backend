@@ -60,7 +60,7 @@ export function ScansOverTime({ data }: { data: Dashboard['scans_over_time'] }) 
   return (
     <div className="h-48" role="img" aria-label="Scans over the last 90 days">
       <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={data} margin={{ top: 8, right: 8, left: -24, bottom: 0 }}>
+        <AreaChart data={data} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
           <defs>
             <linearGradient id="area-cyan" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0" stopColor="#22D3EE" stopOpacity={0.45} />
@@ -98,7 +98,7 @@ export function ScoreTrend({ points }: { points: Dashboard['score_trend'] }) {
   return (
     <div className="h-56" role="img" aria-label="Concern score trend per spot">
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={rows} margin={{ top: 8, right: 8, left: -24, bottom: 0 }}>
+        <LineChart data={rows} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
           <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.06)" />
           <XAxis dataKey="date" tickFormatter={shortDate} minTickGap={24} {...axis} />
           <YAxis domain={[0, 100]} {...axis} width={40} />
