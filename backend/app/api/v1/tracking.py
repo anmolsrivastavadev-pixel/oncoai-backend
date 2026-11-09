@@ -5,8 +5,8 @@ from datetime import UTC, date, datetime, timedelta
 from fastapi import Query, status
 from sqlalchemy import func, select
 
-from app.api.router import SlashRouter
 from app.api.deps import DB, CurrentUser, Paging
+from app.api.router import SlashRouter
 from app.models import Appointment, Lesion, Reminder, Scan, SymptomLog
 from app.models.enums import AppointmentStatus
 from app.schemas.appointment import AppointmentOut

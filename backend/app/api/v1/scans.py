@@ -7,8 +7,8 @@ from fastapi import Depends, File, Form, HTTPException, Query, Response, UploadF
 from pydantic import ValidationError
 from sqlalchemy import func, select
 
-from app.api.router import SlashRouter
 from app.api.deps import DB, CurrentUser, Paging, scan_rate_limit
+from app.api.router import SlashRouter
 from app.core.config import settings
 from app.models import Scan
 from app.schemas.common import Page

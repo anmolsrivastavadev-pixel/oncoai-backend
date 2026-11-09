@@ -98,12 +98,17 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _check_production(self) -> Settings:
-        if self.ENVIRONMENT == "production":
-            if self.SECRET_KEY == DEFAULT_SECRET_KEY or len(self.SECRET_KEY) < 32:
-                raise ValueError(
-                    "SECRET_KEY must be set to a random value of at least 32 characters "
-                    "when ENVIRONMENT=production"
-                )
+        if not self.SECRET_KEY.strip():
+            # An empty env var (e.g. `SECRET_KEY=` from docker compose) must never
+            # become an empty signing key.
+            self.SECRET_KEY = DEFAULT_SECRET_KEY
+        if self.ENVIRONMENT == "production" and (
+            self.SECRET_KEY == DEFAULT_SECRET_KEY or len(self.SECRET_KEY) < 32
+        ):
+            raise ValueError(
+                "SECRET_KEY must be set to a random value of at least 32 characters "
+                "when ENVIRONMENT=production"
+            )
         return self
 
 

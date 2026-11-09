@@ -11,9 +11,7 @@ from app.services.assistant.knowledge_base import ARTICLES, Article
 
 _TOKEN = re.compile(r"[a-z0-9]+")
 STOPWORDS = frozenset(
-    "a an and are as at be but by can do does for from how i if in is it its me my of on or "
-    "should so that the this to was what when where which who why will with you your am have "
-    "has had there their they them we our us any some about into than then too very just".split()
+    ["a", "an", "and", "are", "as", "at", "be", "but", "by", "can", "do", "does", "for", "from", "how", "i", "if", "in", "is", "it", "its", "me", "my", "of", "on", "or", "should", "so", "that", "the", "this", "to", "was", "what", "when", "where", "which", "who", "why", "will", "with", "you", "your", "am", "have", "has", "had", "there", "their", "they", "them", "we", "our", "us", "any", "some", "about", "into", "than", "then", "too", "very", "just"]
 )
 KEYWORD_WEIGHT = 3  # keywords count as if they appeared this many times
 

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from fastapi import HTTPException, Response, status
 
-from app.api.router import SlashRouter
 from app.api.deps import DB, CurrentUser
+from app.api.router import SlashRouter
 from app.core.security import hash_password, verify_password
 from app.models import User
 from app.schemas.user import PasswordChangeIn, UserOut, UserUpdate

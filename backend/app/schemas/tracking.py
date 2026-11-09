@@ -3,9 +3,9 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from app.schemas.appointment import AppointmentOut
+from app.schemas.common import UTCDateTime
 from app.schemas.reminder import ReminderOut
 from app.schemas.scan import ScanOut, ScanSummary, Symptoms
-from app.schemas.common import UTCDateTime
 
 
 class Deltas(BaseModel):

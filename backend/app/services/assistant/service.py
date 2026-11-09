@@ -7,7 +7,8 @@ import logging
 from sqlalchemy.orm import Session
 
 from app.models import Scan
-from app.schemas.assistant import ChatIn, ChatOut, Safety, Source as SourceOut, TopicOut
+from app.schemas.assistant import ChatIn, ChatOut, Safety, TopicOut
+from app.schemas.assistant import Source as SourceOut
 from app.services.assistant import claude_provider, guardrails
 from app.services.assistant.knowledge_base import ARTICLES, ARTICLES_BY_ID, Article, Source
 from app.services.assistant.retrieval import retriever

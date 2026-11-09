@@ -5,8 +5,8 @@ from datetime import UTC, datetime, timedelta
 from fastapi import HTTPException, Query, Response, status
 from sqlalchemy import select
 
-from app.api.router import SlashRouter
 from app.api.deps import DB, CurrentUser
+from app.api.router import SlashRouter
 from app.models import Appointment, Reminder
 from app.schemas.common import Items
 from app.schemas.reminder import ReminderCreate, ReminderOut, ReminderUpdate

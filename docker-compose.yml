@@ -1,0 +1,45 @@
+# Local/full-stack backend: PostgreSQL + OncoAI API.
+#   cp backend/.env.example backend/.env   (set SECRET_KEY)
+#   docker compose up --build
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: oncoai
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-oncoai}
+      POSTGRES_DB: oncoai
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oncoai -d oncoai"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      args:
+        INSTALL_ML: ${INSTALL_ML:-1}
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://oncoai:${POSTGRES_PASSWORD:-oncoai}@db:5432/oncoai
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      SECRET_KEY: ${SECRET_KEY:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,capacitor://localhost,http://localhost,https://localhost}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      IMAGE_ENCRYPTION_KEY: ${IMAGE_ENCRYPTION_KEY:-}
+      # Downloads the scan model on first start (about 330 MB) into the models volume.
+      FETCH_MODEL: ${FETCH_MODEL:-1}
+    ports:
+      - "8000:8000"
+    volumes:
+      - uploads:/data/uploads
+      - models:/data/models
+
+volumes:
+  pgdata:
+  uploads:
+  models:

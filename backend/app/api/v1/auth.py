@@ -4,8 +4,8 @@ from fastapi import Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
-from app.api.router import SlashRouter
 from app.api.deps import DB, auth_rate_limit
+from app.api.router import SlashRouter
 from app.core.security import (
     DUMMY_PASSWORD_HASH,
     TokenError,

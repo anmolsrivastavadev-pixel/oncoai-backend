@@ -8,8 +8,8 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.router import SlashRouter
 from app.api.deps import DB, CurrentUser, Paging
+from app.api.router import SlashRouter
 from app.api.v1.dermatologists import get_dermatologist
 from app.models import Appointment, Dermatologist, Reminder
 from app.models.enums import AppointmentStatus, ReminderKind

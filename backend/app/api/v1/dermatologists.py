@@ -5,8 +5,8 @@ from datetime import date as Date
 from fastapi import HTTPException, Query, status
 from sqlalchemy import func, or_, select
 
-from app.api.router import SlashRouter
 from app.api.deps import DB, CurrentUser, Paging
+from app.api.router import SlashRouter
 from app.models import Dermatologist
 from app.schemas.common import Page
 from app.schemas.dermatologist import AvailabilityOut, DermatologistOut

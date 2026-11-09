@@ -3,8 +3,8 @@ from __future__ import annotations
 from fastapi import Response, status
 from sqlalchemy import func, select
 
-from app.api.router import SlashRouter
 from app.api.deps import DB, CurrentUser, Paging
+from app.api.router import SlashRouter
 from app.models import Lesion, Scan
 from app.schemas.common import Page
 from app.schemas.scan import LesionCreate, LesionDetail, LesionOut, LesionUpdate
