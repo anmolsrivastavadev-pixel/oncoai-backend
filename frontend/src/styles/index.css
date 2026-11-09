@@ -18,6 +18,11 @@
     --safe-right: env(safe-area-inset-right, 0px);
     --bottom-nav-h: 64px;
   }
+  @media (min-width: 1024px) {
+    :root {
+      --bottom-nav-h: 0px;
+    }
+  }
   html {
     -webkit-tap-highlight-color: transparent;
     text-size-adjust: 100%;
